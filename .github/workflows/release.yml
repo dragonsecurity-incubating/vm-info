@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Cross-compile
+        run: make release VERSION=${{ github.ref_name }}
+
+      - name: Package archives + checksums
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          for f in vm-info-*-*-*; do
+            [ -f "$f" ] || continue
+            case "$f" in
+              *.tar.gz|*.zip) continue ;;
+              *.exe) zip -q "${f%.exe}.zip" "$f" ;;
+              *) tar -czf "$f.tar.gz" "$f" ;;
+            esac
+          done
+          sha256sum *.tar.gz *.zip 2>/dev/null > SHA256SUMS || sha256sum *.tar.gz > SHA256SUMS
+          ls -la
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag='${{ github.ref_name }}'
+          assets=$(ls dist/*.tar.gz dist/*.zip dist/SHA256SUMS 2>/dev/null)
+          if gh release view "$tag" >/dev/null 2>&1; then
+            # shellcheck disable=SC2086
+            gh release upload "$tag" $assets --clobber
+          else
+            # shellcheck disable=SC2086
+            gh release create "$tag" \
+              --title "$tag" \
+              --generate-notes \
+              $assets
+          fi
