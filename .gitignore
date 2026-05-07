@@ -1,0 +1,17 @@
+# Build outputs
+/vm-info
+/dist/
+
+# Test / coverage
+*.test
+*.out
+coverage.txt
+
+# OS / editor cruft
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Local Claude state
+/.claude/
