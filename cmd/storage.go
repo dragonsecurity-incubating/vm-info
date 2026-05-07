@@ -1,11 +1,11 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"text/tabwriter"
 
-	"github.com/digitalocean/go-libvirt"
-	"github.com/dragonsecurity/vm-info/internal/virtcli"
+	"github.com/dragonsecurity/vm-info/internal/provider"
 	"github.com/spf13/cobra"
 )
 
@@ -16,16 +16,8 @@ var domblklistCmd = &cobra.Command{
 	Short: "List block devices (like virsh domblklist)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return withLibvirt(func(l *libvirt.Libvirt) error {
-			d, err := lookup(l, args[0])
-			if err != nil {
-				return err
-			}
-			xmlStr, err := l.DomainGetXMLDesc(d, 0)
-			if err != nil {
-				return err
-			}
-			dx, err := virtcli.ParseDomainXML(xmlStr)
+		return runWithVM(args, func(ctx context.Context, p provider.Provider, vm provider.VM) error {
+			disks, err := p.Disks(ctx, vm)
 			if err != nil {
 				return err
 			}
@@ -33,17 +25,17 @@ var domblklistCmd = &cobra.Command{
 			if domblklistDetails {
 				fmt.Fprintln(tw, " Type\tDevice\tTarget\tSource")
 				fmt.Fprintln(tw, "-----\t------\t------\t------")
-				for _, dk := range dx.Devices.Disks {
+				for _, d := range disks {
 					fmt.Fprintf(tw, " %s\t%s\t%s\t%s\n",
-						dash(dk.Type), dash(dk.Device),
-						dash(dk.Target.Dev), dash(dk.SourcePath()))
+						dashIfEmpty(d.Type), dashIfEmpty(d.Device),
+						dashIfEmpty(d.Target), dashIfEmpty(d.Source))
 				}
 			} else {
 				fmt.Fprintln(tw, " Target\tSource")
 				fmt.Fprintln(tw, "-------\t------")
-				for _, dk := range dx.Devices.Disks {
+				for _, d := range disks {
 					fmt.Fprintf(tw, " %s\t%s\n",
-						dash(dk.Target.Dev), dash(dk.SourcePath()))
+						dashIfEmpty(d.Target), dashIfEmpty(d.Source))
 				}
 			}
 			return tw.Flush()
@@ -52,23 +44,19 @@ var domblklistCmd = &cobra.Command{
 }
 
 var domblkinfoCmd = &cobra.Command{
-	Use:   "domblkinfo <domain> <target-or-source>",
+	Use:   "domblkinfo <domain> <target>",
 	Short: "Print block device capacity / allocation",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return withLibvirt(func(l *libvirt.Libvirt) error {
-			d, err := lookup(l, args[0])
-			if err != nil {
-				return err
-			}
-			alloc, capacity, physical, err := l.DomainGetBlockInfo(d, args[1], 0)
+		return runWithVM(args[:1], func(ctx context.Context, p provider.Provider, vm provider.VM) error {
+			bi, err := p.BlockInfo(ctx, vm, args[1])
 			if err != nil {
 				return err
 			}
 			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "Capacity:   %d\n", capacity)
-			fmt.Fprintf(out, "Allocation: %d\n", alloc)
-			fmt.Fprintf(out, "Physical:   %d\n", physical)
+			fmt.Fprintf(out, "Capacity:   %d\n", bi.Capacity)
+			fmt.Fprintf(out, "Allocation: %d\n", bi.Allocation)
+			fmt.Fprintf(out, "Physical:   %d\n", bi.Physical)
 			return nil
 		})
 	},

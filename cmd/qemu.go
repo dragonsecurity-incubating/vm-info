@@ -1,9 +1,10 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
-	"github.com/digitalocean/go-libvirt"
+	"github.com/dragonsecurity/vm-info/internal/provider"
 	"github.com/spf13/cobra"
 )
 
@@ -14,28 +15,19 @@ var qemuAgentCmd = &cobra.Command{
 	Short: "Send a QEMU guest-agent command (like virsh qemu-agent-command)",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return withLibvirt(func(l *libvirt.Libvirt) error {
-			d, err := lookup(l, args[0])
+		return runWithVM(args[:1], func(ctx context.Context, p provider.Provider, vm provider.VM) error {
+			res, err := p.AgentCommand(ctx, vm, args[1], qgaTimeout)
 			if err != nil {
 				return err
 			}
-			res, err := l.QEMUDomainAgentCommand(d, args[1], qgaTimeout, 0)
-			if err != nil {
-				return err
-			}
-			out := cmd.OutOrStdout()
-			if len(res) == 0 {
-				fmt.Fprintln(out, "")
-				return nil
-			}
-			fmt.Fprintln(out, res[0])
+			fmt.Fprintln(cmd.OutOrStdout(), res)
 			return nil
 		})
 	},
 }
 
 func init() {
-	qemuAgentCmd.Flags().Int32Var(&qgaTimeout, "timeout", 5, "agent command timeout (seconds)")
+	qemuAgentCmd.Flags().Int32Var(&qgaTimeout, "timeout", 5, "agent command timeout (seconds, libvirt only)")
 	qemuAgentCmd.Annotations = map[string]string{MutatesAnnotation: "true"}
 	rootCmd.AddCommand(qemuAgentCmd)
 }

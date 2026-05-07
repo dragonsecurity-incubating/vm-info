@@ -1,4 +1,4 @@
-package virtcli
+package libvirt
 
 import (
 	"encoding/json"
@@ -6,9 +6,7 @@ import (
 	"github.com/digitalocean/go-libvirt"
 )
 
-// QGAResponse is the outer shape returned by libvirt's qemu-agent-command
-// passthrough (the QGA "return" field has guest-command-specific contents).
-type QGAResponse struct {
+type qgaResponse struct {
 	Return json.RawMessage `json:"return"`
 	Error  *struct {
 		Class string `json:"class"`
@@ -27,12 +25,10 @@ func qga(l *libvirt.Libvirt, dom libvirt.Domain, cmd string, timeout int32) ([]b
 	return []byte(res[0]), nil
 }
 
-// GuestHostname asks the running guest agent for the hostname. Returns "" when
-// the agent is unreachable or the field is absent — callers should fall back.
-func GuestHostname(l *libvirt.Libvirt, dom libvirt.Domain) string {
-	raw, err := qga(l, dom, `{"execute":"guest-get-host-name"}`, 2)
-	if err == nil && len(raw) > 0 {
-		var r QGAResponse
+// guestHostname asks the running QEMU guest agent for the hostname.
+func guestHostname(l *libvirt.Libvirt, dom libvirt.Domain) string {
+	if raw, err := qga(l, dom, `{"execute":"guest-get-host-name"}`, 2); err == nil && len(raw) > 0 {
+		var r qgaResponse
 		if json.Unmarshal(raw, &r) == nil && r.Error == nil {
 			var asStr string
 			if json.Unmarshal(r.Return, &asStr) == nil && asStr != "" {
@@ -46,9 +42,8 @@ func GuestHostname(l *libvirt.Libvirt, dom libvirt.Domain) string {
 			}
 		}
 	}
-	raw, err = qga(l, dom, `{"execute":"guest-info"}`, 2)
-	if err == nil && len(raw) > 0 {
-		var r QGAResponse
+	if raw, err := qga(l, dom, `{"execute":"guest-info"}`, 2); err == nil && len(raw) > 0 {
+		var r qgaResponse
 		if json.Unmarshal(raw, &r) == nil && r.Error == nil {
 			var asObj struct {
 				Hostname string `json:"hostname"`
@@ -61,33 +56,31 @@ func GuestHostname(l *libvirt.Libvirt, dom libvirt.Domain) string {
 	return ""
 }
 
-// QGAInterface mirrors guest-network-get-interfaces output for callers that
-// want it as a fallback IP source.
-type QGAInterface struct {
+type qgaIface struct {
 	Name        string         `json:"name"`
 	HardwareMAC string         `json:"hardware-address"`
-	IPAddresses []QGAIPAddress `json:"ip-addresses"`
+	IPAddresses []qgaIfaceAddr `json:"ip-addresses"`
 }
 
-type QGAIPAddress struct {
+type qgaIfaceAddr struct {
 	Type   string `json:"ip-address-type"`
 	Addr   string `json:"ip-address"`
 	Prefix int    `json:"prefix"`
 }
 
-func GuestInterfaces(l *libvirt.Libvirt, dom libvirt.Domain) ([]QGAInterface, error) {
+func guestInterfaces(l *libvirt.Libvirt, dom libvirt.Domain) ([]qgaIface, error) {
 	raw, err := qga(l, dom, `{"execute":"guest-network-get-interfaces"}`, 2)
 	if err != nil || len(raw) == 0 {
 		return nil, err
 	}
-	var r QGAResponse
+	var r qgaResponse
 	if err := json.Unmarshal(raw, &r); err != nil {
 		return nil, err
 	}
 	if r.Error != nil {
 		return nil, nil
 	}
-	var ifs []QGAInterface
+	var ifs []qgaIface
 	if err := json.Unmarshal(r.Return, &ifs); err != nil {
 		return nil, err
 	}

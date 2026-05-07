@@ -1,19 +1,17 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"text/tabwriter"
 
-	"github.com/digitalocean/go-libvirt"
-	"github.com/dragonsecurity/vm-info/internal/virtcli"
+	"github.com/dragonsecurity/vm-info/internal/provider"
 	"github.com/spf13/cobra"
 )
 
 var (
-	listAll      bool
-	listInactive bool
-	listName     bool
-	listUUID     bool
+	listName bool
+	listUUID bool
 )
 
 var listCmd = &cobra.Command{
@@ -21,45 +19,33 @@ var listCmd = &cobra.Command{
 	Short: "List domains (like virsh list)",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		return withLibvirt(func(l *libvirt.Libvirt) error {
-			flags := libvirt.ConnectListDomainsActive
-			if listAll {
-				flags = libvirt.ConnectListDomainsActive | libvirt.ConnectListDomainsInactive
-			} else if listInactive {
-				flags = libvirt.ConnectListDomainsInactive
-			}
-			doms, _, err := l.ConnectListAllDomains(1024, flags)
+		return withProvider(func(ctx context.Context, p provider.Provider) error {
+			vms, err := p.List(ctx)
 			if err != nil {
 				return err
 			}
-
 			out := cmd.OutOrStdout()
 			switch {
 			case listName:
-				for _, d := range doms {
-					fmt.Fprintln(out, d.Name)
+				for _, vm := range vms {
+					fmt.Fprintln(out, vm.Name)
 				}
 				return nil
 			case listUUID:
-				for _, d := range doms {
-					fmt.Fprintln(out, virtcli.FormatUUID(d.UUID))
+				for _, vm := range vms {
+					fmt.Fprintln(out, vm.UUID)
 				}
 				return nil
 			}
-
 			tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 			fmt.Fprintln(tw, " Id\tName\tState")
 			fmt.Fprintln(tw, "----\t----\t-----")
-			for _, d := range doms {
-				id := "-"
-				if d.ID > 0 {
-					id = fmt.Sprintf("%d", d.ID)
+			for _, vm := range vms {
+				state, err := p.State(ctx, vm)
+				if err != nil {
+					state = "-"
 				}
-				state := "-"
-				if s, _, _, _, _, err := l.DomainGetInfo(d); err == nil {
-					state = virtcli.StateName(s)
-				}
-				fmt.Fprintf(tw, " %s\t%s\t%s\n", id, d.Name, state)
+				fmt.Fprintf(tw, " %s\t%s\t%s\n", dashIfEmpty(vm.ID), vm.Name, state)
 			}
 			return tw.Flush()
 		})
@@ -67,8 +53,6 @@ var listCmd = &cobra.Command{
 }
 
 func init() {
-	listCmd.Flags().BoolVar(&listAll, "all", false, "include inactive domains")
-	listCmd.Flags().BoolVar(&listInactive, "inactive", false, "show only inactive domains")
 	listCmd.Flags().BoolVar(&listName, "name", false, "print only the names")
 	listCmd.Flags().BoolVar(&listUUID, "uuid", false, "print only the UUIDs")
 	rootCmd.AddCommand(listCmd)

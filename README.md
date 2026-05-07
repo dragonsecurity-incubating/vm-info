@@ -1,8 +1,8 @@
 # vm-info
 
-A pretty libvirt VM summary and a [virsh](https://libvirt.org/manpages/virsh.html)-compatible CLI in a single Go binary, built on top of [`digitalocean/go-libvirt`](https://github.com/digitalocean/go-libvirt) and [Cobra](https://github.com/spf13/cobra).
+A pretty VM summary and a [virsh](https://libvirt.org/manpages/virsh.html)-compatible CLI for **libvirt** and **Proxmox VE** in a single Go binary, built on [`digitalocean/go-libvirt`](https://github.com/digitalocean/go-libvirt), the Proxmox VE REST API, and [Cobra](https://github.com/spf13/cobra).
 
-Run it with no subcommand for an at-a-glance table of every domain on the host. Run it with a subcommand to use it as a virsh replacement for everyday tasks (`list`, `dominfo`, `domifaddr`, `start`, `shutdown`, …).
+Run it with no subcommand for an at-a-glance table of every domain on the host or Proxmox cluster. Run it with a subcommand to use it as a virsh replacement for everyday tasks (`list`, `dominfo`, `domifaddr`, `start`, `shutdown`, …) — the same subcommands work against both backends.
 
 ```text
 $ vm-info -c qemu+ssh://user@hv/system
@@ -36,7 +36,9 @@ Or `go install github.com/dragonsecurity-incubating/vm-info@latest`.
 
 ## Connecting
 
-`-c/--connect URI` accepts the same URI forms as `virsh -c`:
+`-c/--connect URI` selects the backend by scheme:
+
+### libvirt
 
 | URI                                    | Use case                                  |
 |----------------------------------------|-------------------------------------------|
@@ -47,16 +49,40 @@ Or `go install github.com/dragonsecurity-incubating/vm-info@latest`.
 | `qemu+tls://host[:port]/system`        | remote libvirtd over TLS                  |
 | `qemu+libssh://user@host/system?…`     | remote over libssh with extra options     |
 
-`$LIBVIRT_DEFAULT_URI` is honoured when `--connect` is not given.
+### Proxmox VE
+
+```sh
+export PVE_API_TOKEN='root@pam!vminfo=00000000-1111-2222-3333-444444444444'
+vm-info -c 'pve://pve.example.com/'
+# self-signed cert? add ?insecure=1
+vm-info -c 'pve://192.168.10.20/?insecure=1'
+# token inline (e.g. ad-hoc, no env)
+vm-info -c 'pve://10.0.0.1/?token=root@pam!ro=...&insecure=1'
+```
+
+vm-info uses [API tokens](https://pve.proxmox.com/wiki/User_Management#pveum_tokens) (no password). Create one in the Proxmox UI under *Datacenter → Permissions → API Tokens*, give it `VM.Audit` (and `VM.PowerMgmt` if you'll use `--rw`), and pass `USER@REALM!TOKENID=SECRET`. A single connection covers the whole cluster — vm-info uses `/cluster/resources` so VMs from every node show up in one table.
+
+Connection-URI resolution order when `--connect` is omitted:
+
+1. `$VM_INFO_URI`
+2. `$LIBVIRT_DEFAULT_URI`
+3. `qemu:///system`
 
 ## Subcommands
 
-vm-info provides virsh-equivalents for the most common tasks:
+vm-info provides virsh-equivalents for the most common tasks. All subcommands work against both backends; a few have backend-specific notes:
 
 | Read-only                                                                                     | Mutating (require `--rw`)                                       |
 |-----------------------------------------------------------------------------------------------|-----------------------------------------------------------------|
 | `list`, `dominfo`, `dumpxml`, `domid`, `domuuid`, `domhostname`, `domstate`, `vcpucount`      | `start`, `shutdown`, `destroy`, `reboot`, `suspend`, `resume`   |
 | `domifaddr`, `domiflist`, `domblklist`, `domblkinfo`, `version`                               | `qemu-agent-command`                                            |
+
+Backend-specific notes:
+
+- `dumpxml` prints libvirt domain XML for `qemu://` and the Proxmox config dictionary for `pve://`.
+- `domifaddr --source` accepts `lease`, `agent`, `arp` on libvirt; only `agent` on Proxmox (Proxmox doesn't expose lease/ARP via the API).
+- `qemu-agent-command` takes the same `{"execute":"…"}` envelope on both backends; on Proxmox it's translated to a REST `/agent/<cmd>` call.
+- `domid` is the libvirt domain ID for libvirt and the VMID for Proxmox.
 
 vm-info is **read-only by default** for safety; mutating subcommands refuse to run unless you also pass `--rw`:
 

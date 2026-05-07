@@ -1,4 +1,4 @@
-package virtcli
+package provider
 
 import (
 	"fmt"
@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-// CIDRFilter excludes loopback addresses and any IPs that fall inside one of
-// the user-supplied CIDR ranges. Empty filter still drops loopback.
+// CIDRFilter excludes loopback and IPs that fall inside any user-supplied CIDR.
+// A nil filter still drops loopback.
 type CIDRFilter struct {
 	prefixes []netip.Prefix
 }
@@ -28,7 +28,7 @@ func NewCIDRFilter(cidrs []string) (*CIDRFilter, error) {
 	return f, nil
 }
 
-// Allow returns true if the address should be displayed.
+// Allow reports whether addr should be displayed.
 func (f *CIDRFilter) Allow(addr string) bool {
 	a, err := netip.ParseAddr(addr)
 	if err != nil {
@@ -46,4 +46,15 @@ func (f *CIDRFilter) Allow(addr string) bool {
 		}
 	}
 	return true
+}
+
+// FormatIPv4 collapses a list of addresses to "first (+N)" unless wide is set.
+func FormatIPv4(ips []string, wide bool) string {
+	if len(ips) == 0 {
+		return "-"
+	}
+	if wide || len(ips) == 1 {
+		return strings.Join(ips, ",")
+	}
+	return fmt.Sprintf("%s (+%d)", ips[0], len(ips)-1)
 }

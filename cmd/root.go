@@ -1,12 +1,12 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"text/tabwriter"
 
-	"github.com/digitalocean/go-libvirt"
-	"github.com/dragonsecurity/vm-info/internal/virtcli"
+	"github.com/dragonsecurity/vm-info/internal/provider"
 	"github.com/spf13/cobra"
 )
 
@@ -19,16 +19,20 @@ var (
 )
 
 // MutatesAnnotation marks a cobra command as one that changes guest state.
-// Such commands refuse to run unless --rw is supplied.
 const MutatesAnnotation = "vm-info.mutates"
 
 var rootCmd = &cobra.Command{
 	Use:   "vm-info",
-	Short: "Pretty libvirt VM summary and a virsh-compatible CLI",
-	Long: `vm-info renders a one-line-per-VM summary of every libvirt domain on the
-host, with optional disk details. It also exposes a set of virsh-compatible
-subcommands (list, dominfo, domifaddr, start, shutdown, ...) so it can stand
-in as a virsh replacement for everyday tasks.
+	Short: "Pretty VM summary and a virsh-compatible CLI for libvirt and Proxmox VE",
+	Long: `vm-info renders a one-line-per-VM summary of every domain on the host
+or Proxmox cluster, with optional disk details. It also exposes a set of
+virsh-compatible subcommands (list, dominfo, domifaddr, start, shutdown, …)
+so it can stand in as a virsh replacement for everyday tasks.
+
+Backends are selected by the --connect URI scheme:
+
+  qemu:///system, qemu+ssh://..., qemu+tcp://...   → libvirt
+  pve://host[:8006]/?token=..., proxmox://...      → Proxmox VE
 
 Run with no subcommand to print the summary table.
 
@@ -56,7 +60,7 @@ func Execute() error { return rootCmd.Execute() }
 
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&flagURI, "connect", "c", "",
-		"libvirt connection URI (default $LIBVIRT_DEFAULT_URI or qemu:///system)")
+		"connection URI (default $VM_INFO_URI / $LIBVIRT_DEFAULT_URI / qemu:///system)")
 	rootCmd.PersistentFlags().BoolVar(&flagReadWrite, "rw", false,
 		"allow mutating operations (vm-info is read-only by default)")
 	rootCmd.Flags().BoolVar(&flagShowDisks, "disks", false, "show disks for each VM")
@@ -65,91 +69,96 @@ func init() {
 		"hide IPs inside this CIDR (repeatable)")
 }
 
-func withLibvirt(fn func(*libvirt.Libvirt) error) error {
-	l, err := virtcli.Connect(flagURI)
+func withProvider(fn func(context.Context, provider.Provider) error) error {
+	p, err := provider.Connect(flagURI)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = l.Disconnect() }()
-	return fn(l)
+	defer func() { _ = p.Close() }()
+	return fn(context.Background(), p)
 }
 
 func runDefault(cmd *cobra.Command, _ []string) error {
-	filter, err := virtcli.NewCIDRFilter(flagFilterCIDRs)
+	filter, err := provider.NewCIDRFilter(flagFilterCIDRs)
 	if err != nil {
 		return err
 	}
-	return withLibvirt(func(l *libvirt.Libvirt) error {
-		doms, err := virtcli.ListAllDomains(l)
+	return withProvider(func(ctx context.Context, p provider.Provider) error {
+		vms, err := p.List(ctx)
 		if err != nil {
 			return err
 		}
-		printTable(cmd.OutOrStdout(), l, doms, filter, flagShowDisks, flagWide)
+		printTable(ctx, cmd.OutOrStdout(), p, vms, filter, flagShowDisks, flagWide)
 		return nil
 	})
 }
 
-func printTable(w io.Writer, l *libvirt.Libvirt, doms []libvirt.Domain,
-	filter *virtcli.CIDRFilter, showDisks, wide bool) {
+func printTable(ctx context.Context, w io.Writer, p provider.Provider, vms []provider.VM,
+	filter *provider.CIDRFilter, showDisks, wide bool) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "NAME\tID\tSTATE\tvCPU\tRAM(MiB)\tHOSTNAME\tIPv4\tMAC(s)")
 	fmt.Fprintln(tw, "----\t--\t-----\t----\t--------\t--------\t----\t------")
-	for _, d := range doms {
-		v := virtcli.CollectVMInfo(l, d, filter)
+	for _, vm := range vms {
+		info, err := p.Info(ctx, vm, filter)
+		if err != nil {
+			fmt.Fprintf(tw, "%s\t-\terror\t-\t-\t-\t-\t-\n", vm.Name)
+			continue
+		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%s\t%s\t%s\n",
-			v.Name, v.ID, v.State, v.VCPUs, v.RAMMiB,
-			v.Hostname,
-			virtcli.FormatIPv4Column(v.IPv4s, wide),
-			joinList(v.MACs))
+			info.Name, dashIfEmpty(info.ID), info.State, info.VCPUs, info.RAMMiB,
+			dashIfEmpty(info.Hostname),
+			provider.FormatIPv4(info.IPv4s, wide),
+			joinDash(info.MACs))
 	}
 	_ = tw.Flush()
 
 	if showDisks {
-		for _, d := range doms {
-			v := virtcli.CollectVMInfo(l, d, filter)
-			fmt.Fprintf(w, "\n%s disks:\n", v.Name)
-			printDisks(w, l, v)
+		for _, vm := range vms {
+			fmt.Fprintf(w, "\n%s disks:\n", vm.Name)
+			disks, err := p.Disks(ctx, vm)
+			if err != nil {
+				fmt.Fprintf(w, "  (error: %v)\n", err)
+				continue
+			}
+			printDisks(w, disks)
 		}
 	}
 }
 
-func printDisks(w io.Writer, l *libvirt.Libvirt, v virtcli.VMInfo) {
-	if v.XML == nil || len(v.XML.Devices.Disks) == 0 {
+func printDisks(w io.Writer, disks []provider.Disk) {
+	if len(disks) == 0 {
 		fmt.Fprintln(w, "  (no disks)")
 		return
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "  TARGET\tBUS\tSOURCE\tCAPACITY\tALLOCATED")
-	for _, d := range v.XML.Devices.Disks {
-		if d.Device != "disk" {
+	for _, d := range disks {
+		if d.Device != "" && d.Device != "disk" {
 			continue
 		}
-		cap, alloc := "?", "?"
-		if d.Target.Dev != "" {
-			if a, c, _, err := l.DomainGetBlockInfo(v.RawDomain, d.Target.Dev, 0); err == nil {
-				cap = formatGiB(c)
-				alloc = formatGiB(a)
-			}
-		}
 		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\n",
-			dash(d.Target.Dev), dash(d.Target.Bus), dash(d.SourcePath()), cap, alloc)
+			dashIfEmpty(d.Target), dashIfEmpty(d.Bus), dashIfEmpty(d.Source),
+			formatBytes(d.Capacity), formatBytes(d.Allocation))
 	}
 	_ = tw.Flush()
 }
 
-func formatGiB(b uint64) string {
+func formatBytes(b uint64) string {
+	if b == 0 {
+		return "?"
+	}
 	const gib = 1024 * 1024 * 1024
 	return fmt.Sprintf("%.1fGiB", float64(b)/gib)
 }
 
-func dash(s string) string {
+func dashIfEmpty(s string) string {
 	if s == "" {
 		return "-"
 	}
 	return s
 }
 
-func joinList(s []string) string {
+func joinDash(s []string) string {
 	if len(s) == 0 {
 		return "-"
 	}

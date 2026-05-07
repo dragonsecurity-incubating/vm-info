@@ -1,15 +1,21 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
-	"github.com/digitalocean/go-libvirt"
-	"github.com/dragonsecurity/vm-info/internal/virtcli"
+	"github.com/dragonsecurity/vm-info/internal/provider"
 	"github.com/spf13/cobra"
 )
 
-func lookup(l *libvirt.Libvirt, name string) (libvirt.Domain, error) {
-	return l.DomainLookupByName(name)
+func runWithVM(args []string, fn func(ctx context.Context, p provider.Provider, vm provider.VM) error) error {
+	return withProvider(func(ctx context.Context, p provider.Provider) error {
+		vm, err := p.Lookup(ctx, args[0])
+		if err != nil {
+			return err
+		}
+		return fn(ctx, p, vm)
+	})
 }
 
 var dominfoCmd = &cobra.Command{
@@ -17,28 +23,23 @@ var dominfoCmd = &cobra.Command{
 	Short: "Print domain information (like virsh dominfo)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return withLibvirt(func(l *libvirt.Libvirt) error {
-			d, err := lookup(l, args[0])
-			if err != nil {
-				return err
-			}
-			state, maxMem, mem, vcpus, cpuTime, err := l.DomainGetInfo(d)
+		return runWithVM(args, func(ctx context.Context, p provider.Provider, vm provider.VM) error {
+			info, err := p.Info(ctx, vm, nil)
 			if err != nil {
 				return err
 			}
 			out := cmd.OutOrStdout()
-			id := "-"
-			if d.ID > 0 {
-				id = fmt.Sprintf("%d", d.ID)
+			fmt.Fprintf(out, "Id:             %s\n", dashIfEmpty(info.ID))
+			fmt.Fprintf(out, "Name:           %s\n", info.Name)
+			fmt.Fprintf(out, "UUID:           %s\n", dashIfEmpty(info.UUID))
+			if info.Node != "" {
+				fmt.Fprintf(out, "Node:           %s\n", info.Node)
 			}
-			fmt.Fprintf(out, "Id:             %s\n", id)
-			fmt.Fprintf(out, "Name:           %s\n", d.Name)
-			fmt.Fprintf(out, "UUID:           %s\n", virtcli.FormatUUID(d.UUID))
-			fmt.Fprintf(out, "State:          %s\n", virtcli.StateName(state))
-			fmt.Fprintf(out, "CPU(s):         %d\n", vcpus)
-			fmt.Fprintf(out, "CPU time:       %.1fs\n", float64(cpuTime)/1e9)
-			fmt.Fprintf(out, "Max memory:     %d KiB\n", maxMem)
-			fmt.Fprintf(out, "Used memory:    %d KiB\n", mem)
+			fmt.Fprintf(out, "Backend:        %s\n", info.Provider)
+			fmt.Fprintf(out, "State:          %s\n", info.State)
+			fmt.Fprintf(out, "CPU(s):         %d\n", info.VCPUs)
+			fmt.Fprintf(out, "Max memory:     %d MiB\n", info.MaxMiB)
+			fmt.Fprintf(out, "Used memory:    %d MiB\n", info.RAMMiB)
 			return nil
 		})
 	},
@@ -48,23 +49,18 @@ var dumpxmlInactive bool
 
 var dumpxmlCmd = &cobra.Command{
 	Use:   "dumpxml <domain>",
-	Short: "Print the domain XML (like virsh dumpxml)",
+	Short: "Print the domain XML (libvirt) or config dictionary (proxmox)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return withLibvirt(func(l *libvirt.Libvirt) error {
-			d, err := lookup(l, args[0])
+		return runWithVM(args, func(ctx context.Context, p provider.Provider, vm provider.VM) error {
+			s, err := p.Config(ctx, vm, dumpxmlInactive)
 			if err != nil {
 				return err
 			}
-			var flags libvirt.DomainXMLFlags
-			if dumpxmlInactive {
-				flags |= libvirt.DomainXMLInactive
+			fmt.Fprint(cmd.OutOrStdout(), s)
+			if len(s) > 0 && s[len(s)-1] != '\n' {
+				fmt.Fprintln(cmd.OutOrStdout())
 			}
-			xml, err := l.DomainGetXMLDesc(d, flags)
-			if err != nil {
-				return err
-			}
-			fmt.Fprintln(cmd.OutOrStdout(), xml)
 			return nil
 		})
 	},
@@ -75,16 +71,8 @@ var domidCmd = &cobra.Command{
 	Short: "Print the domain id",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return withLibvirt(func(l *libvirt.Libvirt) error {
-			d, err := lookup(l, args[0])
-			if err != nil {
-				return err
-			}
-			id := "-"
-			if d.ID > 0 {
-				id = fmt.Sprintf("%d", d.ID)
-			}
-			fmt.Fprintln(cmd.OutOrStdout(), id)
+		return runWithVM(args, func(ctx context.Context, p provider.Provider, vm provider.VM) error {
+			fmt.Fprintln(cmd.OutOrStdout(), dashIfEmpty(vm.ID))
 			return nil
 		})
 	},
@@ -95,12 +83,8 @@ var domuuidCmd = &cobra.Command{
 	Short: "Print the domain UUID",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return withLibvirt(func(l *libvirt.Libvirt) error {
-			d, err := lookup(l, args[0])
-			if err != nil {
-				return err
-			}
-			fmt.Fprintln(cmd.OutOrStdout(), virtcli.FormatUUID(d.UUID))
+		return runWithVM(args, func(ctx context.Context, p provider.Provider, vm provider.VM) error {
+			fmt.Fprintln(cmd.OutOrStdout(), dashIfEmpty(vm.UUID))
 			return nil
 		})
 	},
@@ -111,20 +95,13 @@ var domhostnameCmd = &cobra.Command{
 	Short: "Print the guest hostname",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return withLibvirt(func(l *libvirt.Libvirt) error {
-			d, err := lookup(l, args[0])
+		return runWithVM(args, func(ctx context.Context, p provider.Provider, vm provider.VM) error {
+			h, err := p.Hostname(ctx, vm)
 			if err != nil {
 				return err
 			}
-			if h, err := l.DomainGetHostname(d, 0); err == nil && h != "" {
-				fmt.Fprintln(cmd.OutOrStdout(), h)
-				return nil
-			}
-			if h := virtcli.GuestHostname(l, d); h != "" {
-				fmt.Fprintln(cmd.OutOrStdout(), h)
-				return nil
-			}
-			return fmt.Errorf("hostname unavailable for %s", args[0])
+			fmt.Fprintln(cmd.OutOrStdout(), h)
+			return nil
 		})
 	},
 }
@@ -134,16 +111,12 @@ var domstateCmd = &cobra.Command{
 	Short: "Print the domain state",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return withLibvirt(func(l *libvirt.Libvirt) error {
-			d, err := lookup(l, args[0])
+		return runWithVM(args, func(ctx context.Context, p provider.Provider, vm provider.VM) error {
+			s, err := p.State(ctx, vm)
 			if err != nil {
 				return err
 			}
-			state, _, err := l.DomainGetState(d, 0)
-			if err != nil {
-				return err
-			}
-			fmt.Fprintln(cmd.OutOrStdout(), virtcli.StateName(uint8(state)))
+			fmt.Fprintln(cmd.OutOrStdout(), s)
 			return nil
 		})
 	},
@@ -154,23 +127,19 @@ var vcpucountCmd = &cobra.Command{
 	Short: "Print the current vCPU count",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return withLibvirt(func(l *libvirt.Libvirt) error {
-			d, err := lookup(l, args[0])
+		return runWithVM(args, func(ctx context.Context, p provider.Provider, vm provider.VM) error {
+			info, err := p.Info(ctx, vm, nil)
 			if err != nil {
 				return err
 			}
-			_, _, _, vcpus, _, err := l.DomainGetInfo(d)
-			if err != nil {
-				return err
-			}
-			fmt.Fprintln(cmd.OutOrStdout(), vcpus)
+			fmt.Fprintln(cmd.OutOrStdout(), info.VCPUs)
 			return nil
 		})
 	},
 }
 
 func init() {
-	dumpxmlCmd.Flags().BoolVar(&dumpxmlInactive, "inactive", false, "show inactive (persistent) XML")
+	dumpxmlCmd.Flags().BoolVar(&dumpxmlInactive, "inactive", false, "show inactive (persistent) config (libvirt only)")
 	rootCmd.AddCommand(dominfoCmd, dumpxmlCmd, domidCmd, domuuidCmd,
 		domhostnameCmd, domstateCmd, vcpucountCmd)
 }

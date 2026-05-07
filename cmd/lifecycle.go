@@ -1,9 +1,10 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
-	"github.com/digitalocean/go-libvirt"
+	"github.com/dragonsecurity/vm-info/internal/provider"
 	"github.com/spf13/cobra"
 )
 
@@ -12,15 +13,11 @@ var startCmd = &cobra.Command{
 	Short: "Start a domain",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return withLibvirt(func(l *libvirt.Libvirt) error {
-			d, err := lookup(l, args[0])
-			if err != nil {
+		return runWithVM(args, func(ctx context.Context, p provider.Provider, vm provider.VM) error {
+			if err := p.Start(ctx, vm); err != nil {
 				return err
 			}
-			if err := l.DomainCreate(d); err != nil {
-				return err
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Domain %s started\n", d.Name)
+			fmt.Fprintf(cmd.OutOrStdout(), "Domain %s started\n", vm.Name)
 			return nil
 		})
 	},
@@ -31,15 +28,11 @@ var shutdownCmd = &cobra.Command{
 	Short: "Gracefully shutdown a domain",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return withLibvirt(func(l *libvirt.Libvirt) error {
-			d, err := lookup(l, args[0])
-			if err != nil {
+		return runWithVM(args, func(ctx context.Context, p provider.Provider, vm provider.VM) error {
+			if err := p.Shutdown(ctx, vm); err != nil {
 				return err
 			}
-			if err := l.DomainShutdown(d); err != nil {
-				return err
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Domain %s is being shutdown\n", d.Name)
+			fmt.Fprintf(cmd.OutOrStdout(), "Domain %s is being shutdown\n", vm.Name)
 			return nil
 		})
 	},
@@ -50,15 +43,11 @@ var destroyCmd = &cobra.Command{
 	Short: "Forcefully stop a domain",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return withLibvirt(func(l *libvirt.Libvirt) error {
-			d, err := lookup(l, args[0])
-			if err != nil {
+		return runWithVM(args, func(ctx context.Context, p provider.Provider, vm provider.VM) error {
+			if err := p.Destroy(ctx, vm); err != nil {
 				return err
 			}
-			if err := l.DomainDestroy(d); err != nil {
-				return err
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Domain %s destroyed\n", d.Name)
+			fmt.Fprintf(cmd.OutOrStdout(), "Domain %s destroyed\n", vm.Name)
 			return nil
 		})
 	},
@@ -71,19 +60,11 @@ var rebootCmd = &cobra.Command{
 	Short: "Reboot a domain",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return withLibvirt(func(l *libvirt.Libvirt) error {
-			d, err := lookup(l, args[0])
-			if err != nil {
+		return runWithVM(args, func(ctx context.Context, p provider.Provider, vm provider.VM) error {
+			if err := p.Reboot(ctx, vm, provider.RebootOpts{ACPI: rebootAcpi}); err != nil {
 				return err
 			}
-			flags := libvirt.DomainRebootDefault
-			if rebootAcpi {
-				flags = libvirt.DomainRebootAcpiPowerBtn
-			}
-			if err := l.DomainReboot(d, flags); err != nil {
-				return err
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Domain %s is being rebooted\n", d.Name)
+			fmt.Fprintf(cmd.OutOrStdout(), "Domain %s is being rebooted\n", vm.Name)
 			return nil
 		})
 	},
@@ -94,15 +75,11 @@ var suspendCmd = &cobra.Command{
 	Short: "Suspend a domain",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return withLibvirt(func(l *libvirt.Libvirt) error {
-			d, err := lookup(l, args[0])
-			if err != nil {
+		return runWithVM(args, func(ctx context.Context, p provider.Provider, vm provider.VM) error {
+			if err := p.Suspend(ctx, vm); err != nil {
 				return err
 			}
-			if err := l.DomainSuspend(d); err != nil {
-				return err
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Domain %s suspended\n", d.Name)
+			fmt.Fprintf(cmd.OutOrStdout(), "Domain %s suspended\n", vm.Name)
 			return nil
 		})
 	},
@@ -113,22 +90,18 @@ var resumeCmd = &cobra.Command{
 	Short: "Resume a suspended domain",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return withLibvirt(func(l *libvirt.Libvirt) error {
-			d, err := lookup(l, args[0])
-			if err != nil {
+		return runWithVM(args, func(ctx context.Context, p provider.Provider, vm provider.VM) error {
+			if err := p.Resume(ctx, vm); err != nil {
 				return err
 			}
-			if err := l.DomainResume(d); err != nil {
-				return err
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Domain %s resumed\n", d.Name)
+			fmt.Fprintf(cmd.OutOrStdout(), "Domain %s resumed\n", vm.Name)
 			return nil
 		})
 	},
 }
 
 func init() {
-	rebootCmd.Flags().BoolVar(&rebootAcpi, "acpi", false, "use ACPI power button instead of default")
+	rebootCmd.Flags().BoolVar(&rebootAcpi, "acpi", false, "use ACPI power button instead of default (libvirt only)")
 	mutating := []*cobra.Command{startCmd, shutdownCmd, destroyCmd, rebootCmd, suspendCmd, resumeCmd}
 	for _, c := range mutating {
 		if c.Annotations == nil {
