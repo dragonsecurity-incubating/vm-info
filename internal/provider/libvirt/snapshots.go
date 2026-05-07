@@ -12,13 +12,13 @@ import (
 
 // snapshotXML is the projection of libvirt's <domainsnapshot> XML.
 type snapshotXML struct {
-	XMLName      xml.Name           `xml:"domainsnapshot"`
-	Name         string             `xml:"name"`
-	Description  string             `xml:"description"`
-	State        string             `xml:"state"`
-	CreationTime int64              `xml:"creationTime"`
-	Parent       snapshotXMLParent  `xml:"parent"`
-	Memory       snapshotXMLMemory  `xml:"memory"`
+	XMLName      xml.Name          `xml:"domainsnapshot"`
+	Name         string            `xml:"name"`
+	Description  string            `xml:"description"`
+	State        string            `xml:"state"`
+	CreationTime int64             `xml:"creationTime"`
+	Parent       snapshotXMLParent `xml:"parent"`
+	Memory       snapshotXMLMemory `xml:"memory"`
 }
 
 type snapshotXMLParent struct {
@@ -140,4 +140,3 @@ func (p *Provider) CreateBackup(_ context.Context, _ provider.VM, _ provider.Bac
 func (p *Provider) DeleteBackup(_ context.Context, _ provider.VM, _ string) error {
 	return fmt.Errorf("%w: libvirt has no backup catalog", provider.ErrNotSupported)
 }
-
