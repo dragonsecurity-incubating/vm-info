@@ -74,9 +74,10 @@ vm-info provides virsh-equivalents for the most common tasks. All subcommands wo
 
 | Read-only                                                                                     | Mutating (require `--rw`)                                       |
 |-----------------------------------------------------------------------------------------------|-----------------------------------------------------------------|
-| `list`, `dominfo`, `dumpxml`, `domid`, `domuuid`, `domhostname`, `domstate`, `vcpucount`      | `start`, `shutdown`, `destroy`, `reboot`, `suspend`, `resume`   |
-| `domifaddr`, `domiflist`, `domblklist`, `domblkinfo`, `version`                               | `qemu-agent-command`                                            |
-| `snapshot list`, `backup list`                                                                | `snapshot {create,delete,revert}`, `backup {create,delete}`     |
+| `list`, `dominfo`, `dumpxml`, `domid`, `domuuid`, `domhostname`, `domstate`, `vcpucount`      | `start`, `shutdown`, `destroy`, `reboot`, `reset`, `suspend`, `resume` |
+| `domifaddr`, `domiflist`, `domblklist`, `domblkinfo`, `version`, `stats`, `top`               | `qemu-agent-command`                                            |
+| `snapshot list`, `backup list`, `autostart <vm>` (show only)                                  | `snapshot {create,delete,revert}`, `backup {create,delete}`     |
+| `task {status,log,watch}`                                                                     | `autostart <vm> on\|off`, `resize {cpu,memory,disk}`, `migrate` |
 
 Backend-specific notes:
 
@@ -122,6 +123,25 @@ vm-info -c "$pve" task log "$upid"       # full log
 ```
 
 `task` works only against Proxmox UPIDs — libvirt operations are synchronous over RPC, so the libvirt provider returns `not supported` for the whole subtree.
+
+### Day-2 operations
+
+```sh
+vm-info top                                # live CPU/RAM/disk/net grid (Ctrl-C to exit)
+vm-info top --once --sort mem              # one snapshot, sorted by memory
+vm-info stats cp1                          # one VM's counters
+vm-info autostart cp1                      # show
+vm-info --rw autostart cp1 on              # set
+vm-info --rw reset cp1                     # hard reset
+vm-info --rw resize cpu cp1 8 --live --config
+vm-info --rw resize memory cp1 16G --live --config
+vm-info --rw resize disk cp1 vda 64G       # guest still has to grow the FS
+vm-info --rw migrate 100 pve2 --online     # proxmox: live migrate to another node
+```
+
+`migrate` against `qemu://` returns `not supported` with a pointer to `virsh migrate` — vm-info doesn't yet implement the libvirt P2P migration handshake.
+
+`resize {cpu,memory}` on libvirt accepts `--live` (apply to the running guest) and `--config` (persist across reboots); without flags, libvirt's default of "live if running, config if shutoff" applies. Proxmox config is always persistent and live-applies when the VM supports hot-plug.
 
 vm-info is **read-only by default** for safety; mutating subcommands refuse to run unless you also pass `--rw`:
 

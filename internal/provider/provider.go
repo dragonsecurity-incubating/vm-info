@@ -121,6 +121,44 @@ type BackupOpts struct {
 	Notes    string
 }
 
+// Stats is a point-in-time sample of resource counters for one VM. CPU time
+// is cumulative nanoseconds (Linux jiffy-style); disk and network counters
+// are cumulative bytes. CPUPercent is filled when the backend already
+// computes the rolling-average (Proxmox does); HasCPUPercent flags that.
+type Stats struct {
+	SampledAt     time.Time
+	CPUTimeNanos  uint64
+	CPUPercent    float64
+	HasCPUPercent bool
+	VCPUs         int
+
+	MemTotalBytes uint64
+	MemUsedBytes  uint64
+
+	DiskReadBytes  uint64
+	DiskWriteBytes uint64
+
+	NetRXBytes uint64
+	NetTXBytes uint64
+}
+
+// ResizeFlags controls whether resize ops apply to the live VM, the
+// persistent config, or both. With both false, the backend's default
+// applies (live for a running guest, config otherwise).
+type ResizeFlags struct {
+	Live   bool
+	Config bool
+}
+
+// MigrateOpts shapes a `migrate` call.
+type MigrateOpts struct {
+	// Live attempts a live (no-pause) migration when the backend supports it.
+	Live bool
+	// Online is a Proxmox-specific synonym for "running guest, no shutdown";
+	// if Online is true the request maps to online=1 in /migrate.
+	Online bool
+}
+
 // TaskStatus is a generic async task report (Proxmox UPID-style). Libvirt
 // operations are synchronous, so its provider returns ErrNotSupported.
 type TaskStatus struct {
@@ -179,6 +217,15 @@ type Provider interface {
 
 	TaskStatus(ctx context.Context, upid string) (TaskStatus, error)
 	TaskLog(ctx context.Context, upid string, start int) ([]TaskLogLine, error)
+
+	Stats(ctx context.Context, vm VM) (Stats, error)
+	GetAutostart(ctx context.Context, vm VM) (bool, error)
+	SetAutostart(ctx context.Context, vm VM, on bool) error
+	Reset(ctx context.Context, vm VM) error
+	SetVCPUs(ctx context.Context, vm VM, count int, flags ResizeFlags) error
+	SetMemoryMiB(ctx context.Context, vm VM, mib uint64, flags ResizeFlags) error
+	ResizeDisk(ctx context.Context, vm VM, target string, sizeBytes uint64) error
+	Migrate(ctx context.Context, vm VM, dest string, opts MigrateOpts) error
 }
 
 // Factory dials a provider for the supplied URI.
