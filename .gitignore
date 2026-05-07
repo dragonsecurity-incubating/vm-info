@@ -15,3 +15,4 @@ coverage.txt
 
 # Local Claude state
 /.claude/
+.env

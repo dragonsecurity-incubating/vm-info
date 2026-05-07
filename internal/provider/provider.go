@@ -11,6 +11,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 )
 
 // ErrNotSupported is returned by a provider for operations that don't apply
@@ -82,6 +83,44 @@ type RebootOpts struct {
 	ACPI bool
 }
 
+// Snapshot is one VM snapshot.
+type Snapshot struct {
+	Name        string
+	Description string
+	State       string // libvirt: domain state at snapshot; proxmox: "running"/"stopped"
+	CreatedAt   time.Time
+	Parent      string
+	HasMemory   bool
+	Current     bool
+}
+
+// SnapshotOpts shapes a `snapshot create` call.
+type SnapshotOpts struct {
+	Description string
+	// Memory asks for memory state to be included. On libvirt this is the
+	// default for running guests; on Proxmox it maps to vmstate=1.
+	Memory bool
+}
+
+// Backup is one VM backup. Different backends populate different fields.
+type Backup struct {
+	ID        string // proxmox volid, e.g. "local:backup/vzdump-qemu-100-...vma.zst"
+	Name      string // human-friendly file name
+	Format    string // "vma.zst", "tar.gz", ...
+	Size      uint64 // bytes
+	CreatedAt time.Time
+	Storage   string // proxmox storage name
+	Notes     string
+}
+
+// BackupOpts shapes a `backup create` call.
+type BackupOpts struct {
+	Storage  string // proxmox: required (or "first backup-capable storage")
+	Mode     string // proxmox: "snapshot" / "suspend" / "stop"; default snapshot
+	Compress string // proxmox: "zstd" / "gzip" / "lzo" / "" (none); default zstd
+	Notes    string
+}
+
 // Provider is the cross-backend hypervisor interface.
 type Provider interface {
 	Close() error
@@ -108,6 +147,15 @@ type Provider interface {
 	Resume(ctx context.Context, vm VM) error
 
 	AgentCommand(ctx context.Context, vm VM, cmd string, timeoutSec int32) (string, error)
+
+	ListSnapshots(ctx context.Context, vm VM) ([]Snapshot, error)
+	CreateSnapshot(ctx context.Context, vm VM, name string, opts SnapshotOpts) error
+	DeleteSnapshot(ctx context.Context, vm VM, name string) error
+	RevertSnapshot(ctx context.Context, vm VM, name string) error
+
+	ListBackups(ctx context.Context, vm VM) ([]Backup, error)
+	CreateBackup(ctx context.Context, vm VM, opts BackupOpts) (string, error)
+	DeleteBackup(ctx context.Context, vm VM, id string) error
 }
 
 // Factory dials a provider for the supplied URI.

@@ -76,6 +76,7 @@ vm-info provides virsh-equivalents for the most common tasks. All subcommands wo
 |-----------------------------------------------------------------------------------------------|-----------------------------------------------------------------|
 | `list`, `dominfo`, `dumpxml`, `domid`, `domuuid`, `domhostname`, `domstate`, `vcpucount`      | `start`, `shutdown`, `destroy`, `reboot`, `suspend`, `resume`   |
 | `domifaddr`, `domiflist`, `domblklist`, `domblkinfo`, `version`                               | `qemu-agent-command`                                            |
+| `snapshot list`, `backup list`                                                                | `snapshot {create,delete,revert}`, `backup {create,delete}`     |
 
 Backend-specific notes:
 
@@ -83,6 +84,35 @@ Backend-specific notes:
 - `domifaddr --source` accepts `lease`, `agent`, `arp` on libvirt; only `agent` on Proxmox (Proxmox doesn't expose lease/ARP via the API).
 - `qemu-agent-command` takes the same `{"execute":"…"}` envelope on both backends; on Proxmox it's translated to a REST `/agent/<cmd>` call.
 - `domid` is the libvirt domain ID for libvirt and the VMID for Proxmox.
+
+### Snapshots
+
+Snapshots are point-in-time copies; both backends support them natively.
+
+```sh
+vm-info snapshot list cp1
+vm-info --rw snapshot create cp1 pre-upgrade --description "before kernel bump"
+vm-info --rw snapshot create cp1 with-mem --memory       # include RAM state
+vm-info --rw snapshot revert cp1 pre-upgrade
+vm-info --rw snapshot delete cp1 pre-upgrade
+```
+
+The current snapshot is marked with `*` in `snapshot list`.
+
+### Backups
+
+| Backend  | Status                                                                                              |
+|----------|-----------------------------------------------------------------------------------------------------|
+| Proxmox  | Full support via `vzdump`; choose mode (snapshot / suspend / stop), compression, target storage.    |
+| libvirt  | Not implemented — libvirt's native backup API is incremental-only and requires NBD setup. Use external tooling (`virt-backup`, `virsh backup-begin`) or `snapshot create` for point-in-time copies. |
+
+```sh
+vm-info backup list 100
+vm-info --rw backup create 100 --storage local --mode snapshot --compress zstd
+vm-info --rw backup delete 100 'local:backup/vzdump-qemu-100-...vma.zst'
+```
+
+`backup create` returns immediately with the Proxmox task UPID; track progress in the Proxmox UI or via `pvesh get /nodes/<node>/tasks/<upid>/status`.
 
 vm-info is **read-only by default** for safety; mutating subcommands refuse to run unless you also pass `--rw`:
 
