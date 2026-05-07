@@ -76,6 +76,10 @@ func newClient(uri string) (*client, error) {
 
 func (c *client) do(ctx context.Context, method, path string, form url.Values, out any) error {
 	endpoint := *c.base
+	if i := strings.IndexByte(path, '?'); i >= 0 {
+		endpoint.RawQuery = path[i+1:]
+		path = path[:i]
+	}
 	endpoint.Path = c.base.Path + path
 
 	var body io.Reader
@@ -147,6 +151,10 @@ func summarize(b []byte) string {
 // peek lets us reuse do() for raw JSON inspection (used by AgentCommand).
 func (c *client) postRaw(ctx context.Context, path string, form url.Values) ([]byte, error) {
 	endpoint := *c.base
+	if i := strings.IndexByte(path, '?'); i >= 0 {
+		endpoint.RawQuery = path[i+1:]
+		path = path[:i]
+	}
 	endpoint.Path = c.base.Path + path
 	var body io.Reader
 	if form != nil {

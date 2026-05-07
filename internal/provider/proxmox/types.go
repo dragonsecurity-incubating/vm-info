@@ -1,6 +1,26 @@
 package proxmox
 
-// resource is one entry in /cluster/resources?type=vm.
+// nodeInfo is one entry in GET /nodes.
+type nodeInfo struct {
+	Node   string `json:"node"`
+	Status string `json:"status"`
+	Type   string `json:"type"`
+}
+
+// nodeVM is one entry in GET /nodes/{node}/qemu.
+type nodeVM struct {
+	VMID   int    `json:"vmid"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	CPUs   int    `json:"cpus"`
+	MaxMem uint64 `json:"maxmem"`
+	Mem    uint64 `json:"mem"`
+	Uptime uint64 `json:"uptime"`
+}
+
+// resource is the unified row used by the Provider, populated either from
+// /cluster/resources (cluster members) or /nodes/{node}/qemu (standalone or
+// fallback path).
 type resource struct {
 	ID     string  `json:"id"`     // "qemu/100"
 	Type   string  `json:"type"`   // "qemu" or "lxc"

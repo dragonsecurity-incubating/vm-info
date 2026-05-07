@@ -49,17 +49,55 @@ func (p *Provider) URI() string  { return p.c.uri }
 // --- list / lookup --------------------------------------------------------
 
 func (p *Provider) listResources(ctx context.Context) ([]resource, error) {
-	var rs []resource
-	if err := p.c.get(ctx, "/cluster/resources?type=vm", &rs); err != nil {
+	// Try /cluster/resources first — it's a single call covering every node.
+	// Falls back to per-node enumeration on standalone hosts where Proxmox
+	// returns 501 for the entire /cluster/* tree.
+	var cluster []resource
+	if err := p.c.get(ctx, "/cluster/resources?type=vm", &cluster); err == nil {
+		out := cluster[:0]
+		for _, r := range cluster {
+			if r.Type == "qemu" {
+				out = append(out, r)
+			}
+		}
+		return out, nil
+	} else if !is501(err) {
 		return nil, err
 	}
-	out := rs[:0]
-	for _, r := range rs {
-		if r.Type == "qemu" {
-			out = append(out, r)
+
+	var nodes []nodeInfo
+	if err := p.c.get(ctx, "/nodes", &nodes); err != nil {
+		return nil, err
+	}
+	var out []resource
+	for _, n := range nodes {
+		var vms []nodeVM
+		if err := p.c.get(ctx, "/nodes/"+n.Node+"/qemu", &vms); err != nil {
+			return nil, fmt.Errorf("list qemu on node %s: %w", n.Node, err)
+		}
+		for _, vm := range vms {
+			out = append(out, resource{
+				ID:     fmt.Sprintf("qemu/%d", vm.VMID),
+				Type:   "qemu",
+				Name:   vm.Name,
+				VMID:   vm.VMID,
+				Node:   n.Node,
+				Status: vm.Status,
+				MaxCPU: float64(vm.CPUs),
+				MaxMem: vm.MaxMem,
+				Mem:    vm.Mem,
+				Uptime: vm.Uptime,
+			})
 		}
 	}
 	return out, nil
+}
+
+func is501(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), ": 501 ")
 }
 
 func (p *Provider) toVM(r resource) provider.VM {
