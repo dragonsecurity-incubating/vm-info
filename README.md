@@ -156,6 +156,21 @@ vm-info v0.1.0 (abc1234)
   go:    go1.24 linux/amd64
 ```
 
+## Self-update
+
+`vm-info update` replaces the running binary with the latest GitHub release. It picks the asset matching `runtime.GOOS/GOARCH`, verifies the download against the release's `SHA256SUMS`, and atomically renames over the current executable (safe on Linux/macOS).
+
+```sh
+vm-info update --check                # only show available release
+vm-info update                        # interactive prompt, then swap
+vm-info update --yes                  # skip the prompt
+vm-info update --version v0.2.0       # install a specific tag
+vm-info update --pre                  # include pre-releases
+vm-info update --force                # reinstall even if tags match
+```
+
+If the binary lives in a root-owned location (e.g. `/usr/local/bin`), run with `sudo`. `update` refuses to run on `go run` temp builds.
+
 ## Releasing
 
 The `Release` workflow runs on `v*` tags. To cut a release:
