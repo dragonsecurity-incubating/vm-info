@@ -121,6 +121,26 @@ type BackupOpts struct {
 	Notes    string
 }
 
+// TaskStatus is a generic async task report (Proxmox UPID-style). Libvirt
+// operations are synchronous, so its provider returns ErrNotSupported.
+type TaskStatus struct {
+	UPID       string
+	Type       string
+	Status     string // "running" / "stopped"
+	Running    bool
+	ExitStatus string // "OK" on success
+	StartTime  time.Time
+	Node       string
+	ID         string
+	User       string
+}
+
+// TaskLogLine is one numbered log line from a task.
+type TaskLogLine struct {
+	N    int
+	Text string
+}
+
 // Provider is the cross-backend hypervisor interface.
 type Provider interface {
 	Close() error
@@ -156,6 +176,9 @@ type Provider interface {
 	ListBackups(ctx context.Context, vm VM) ([]Backup, error)
 	CreateBackup(ctx context.Context, vm VM, opts BackupOpts) (string, error)
 	DeleteBackup(ctx context.Context, vm VM, id string) error
+
+	TaskStatus(ctx context.Context, upid string) (TaskStatus, error)
+	TaskLog(ctx context.Context, upid string, start int) ([]TaskLogLine, error)
 }
 
 // Factory dials a provider for the supplied URI.

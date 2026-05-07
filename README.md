@@ -112,7 +112,16 @@ vm-info --rw backup create 100 --storage local --mode snapshot --compress zstd
 vm-info --rw backup delete 100 'local:backup/vzdump-qemu-100-...vma.zst'
 ```
 
-`backup create` returns immediately with the Proxmox task UPID; track progress in the Proxmox UI or via `pvesh get /nodes/<node>/tasks/<upid>/status`.
+`backup create` returns immediately with the Proxmox task UPID; follow it from the same CLI:
+
+```sh
+upid=$(vm-info --rw -c "$pve" backup create 100 --storage local | awk '{print $NF}')
+vm-info -c "$pve" task watch "$upid"     # tails the log, exits non-zero on failure
+vm-info -c "$pve" task status "$upid"    # one-shot status
+vm-info -c "$pve" task log "$upid"       # full log
+```
+
+`task` works only against Proxmox UPIDs — libvirt operations are synchronous over RPC, so the libvirt provider returns `not supported` for the whole subtree.
 
 vm-info is **read-only by default** for safety; mutating subcommands refuse to run unless you also pass `--rw`:
 
