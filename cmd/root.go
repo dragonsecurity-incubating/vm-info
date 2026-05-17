@@ -95,20 +95,38 @@ func runDefault(cmd *cobra.Command, _ []string) error {
 
 func printTable(ctx context.Context, w io.Writer, p provider.Provider, vms []provider.VM,
 	filter *provider.CIDRFilter, showDisks, wide bool) {
+	showNode := wide && anyNode(vms)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tID\tSTATE\tvCPU\tRAM(MiB)\tHOSTNAME\tIPv4\tMAC(s)")
-	fmt.Fprintln(tw, "----\t--\t-----\t----\t--------\t--------\t----\t------")
+	if showNode {
+		fmt.Fprintln(tw, "NAME\tNODE\tID\tSTATE\tvCPU\tRAM(MiB)\tHOSTNAME\tIPv4\tMAC(s)")
+		fmt.Fprintln(tw, "----\t----\t--\t-----\t----\t--------\t--------\t----\t------")
+	} else {
+		fmt.Fprintln(tw, "NAME\tID\tSTATE\tvCPU\tRAM(MiB)\tHOSTNAME\tIPv4\tMAC(s)")
+		fmt.Fprintln(tw, "----\t--\t-----\t----\t--------\t--------\t----\t------")
+	}
 	for _, vm := range vms {
 		info, err := p.Info(ctx, vm, filter)
 		if err != nil {
-			fmt.Fprintf(tw, "%s\t-\terror\t-\t-\t-\t-\t-\n", vm.Name)
+			if showNode {
+				fmt.Fprintf(tw, "%s\t%s\t-\terror\t-\t-\t-\t-\t-\n", vm.Name, dashIfEmpty(vm.Node))
+			} else {
+				fmt.Fprintf(tw, "%s\t-\terror\t-\t-\t-\t-\t-\n", vm.Name)
+			}
 			continue
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%s\t%s\t%s\n",
-			info.Name, dashIfEmpty(info.ID), info.State, info.VCPUs, info.RAMMiB,
-			dashIfEmpty(info.Hostname),
-			provider.FormatIPv4(info.IPv4s, wide),
-			joinDash(info.MACs))
+		if showNode {
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%d\t%s\t%s\t%s\n",
+				info.Name, dashIfEmpty(info.Node), dashIfEmpty(info.ID), info.State, info.VCPUs, info.RAMMiB,
+				dashIfEmpty(info.Hostname),
+				provider.FormatIPv4(info.IPv4s, wide),
+				joinDash(info.MACs))
+		} else {
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%s\t%s\t%s\n",
+				info.Name, dashIfEmpty(info.ID), info.State, info.VCPUs, info.RAMMiB,
+				dashIfEmpty(info.Hostname),
+				provider.FormatIPv4(info.IPv4s, wide),
+				joinDash(info.MACs))
+		}
 	}
 	_ = tw.Flush()
 
@@ -156,6 +174,15 @@ func dashIfEmpty(s string) string {
 		return "-"
 	}
 	return s
+}
+
+func anyNode(vms []provider.VM) bool {
+	for _, vm := range vms {
+		if vm.Node != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func joinDash(s []string) string {
