@@ -68,6 +68,18 @@ Connection-URI resolution order when `--connect` is omitted:
 2. `$LIBVIRT_DEFAULT_URI`
 3. `qemu:///system`
 
+### `.env` files
+
+vm-info auto-loads a `.env` file from the working directory on startup, so you don't have to export secrets like `PVE_API_TOKEN` in your shell. Copy `.env.example` to `.env` and fill in what you need — `.env` is gitignored.
+
+```sh
+cp .env.example .env
+$EDITOR .env
+vm-info -c pve://pve.example.com/
+```
+
+Real environment variables still win over `.env` values, so you can still override per-invocation with `PVE_API_TOKEN=... vm-info ...`.
+
 ## Subcommands
 
 vm-info provides virsh-equivalents for the most common tasks. All subcommands work against both backends; a few have backend-specific notes:

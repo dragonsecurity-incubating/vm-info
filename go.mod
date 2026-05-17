@@ -4,6 +4,7 @@ go 1.26.3
 
 require (
 	github.com/digitalocean/go-libvirt v0.0.0-20260217163227-273eaa321819
+	github.com/joho/godotenv v1.5.1
 	github.com/spf13/cobra v1.10.2
 )
 

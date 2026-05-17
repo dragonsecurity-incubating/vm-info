@@ -10,9 +10,12 @@ import (
 	// init() which registers its URI schemes with internal/provider.
 	_ "github.com/dragonsecurity/vm-info/internal/provider/libvirt"
 	_ "github.com/dragonsecurity/vm-info/internal/provider/proxmox"
+
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	_ = godotenv.Load(".env")
 	if err := cmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
