@@ -226,6 +226,9 @@ type Provider interface {
 	SetMemoryMiB(ctx context.Context, vm VM, mib uint64, flags ResizeFlags) error
 	ResizeDisk(ctx context.Context, vm VM, target string, sizeBytes uint64) error
 	Migrate(ctx context.Context, vm VM, dest string, opts MigrateOpts) error
+
+	AttachISO(ctx context.Context, vm VM, slot, source string) error
+	EjectISO(ctx context.Context, vm VM, slot string) error
 }
 
 // Factory dials a provider for the supplied URI.
