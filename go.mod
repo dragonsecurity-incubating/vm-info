@@ -1,6 +1,6 @@
 module github.com/dragonsecurity/vm-info
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/digitalocean/go-libvirt v0.0.0-20260217163227-273eaa321819
